@@ -140,3 +140,11 @@ tablename_to_fields = {
         }
     }
 }
+
+request_contain_key={
+    "page": ["pageIndex", "pageSize",""],
+    "sort": ["sortOrder","sortField"],
+    "action": ["all"],
+    "export": ["export_limit"],
+    "where": []
+}
