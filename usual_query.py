@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from setting import tablename_to_fields, action_to_tablename, request_contain_key
 from database.operate import connector
 from django.http import FileResponse
@@ -7,6 +8,7 @@ import csv
 # from django.utils.six.moves import range
 from django.http import StreamingHttpResponse
 from django.http import HttpResponse
+from datetime import datetime
 
 
 class Echo(object):
@@ -20,11 +22,18 @@ class Echo(object):
         return value
 
 
+class DateEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.__str__()
+        return json.JSONEncoder.default(self, obj)
+
+
 class Query(object):
     """docstring for Query"""
 
     def __init__(self):
-        self.key_to_type = {v: k for k, v in request_contain_key.items()}
+        self.key_to_type = {field: k for k, v in request_contain_key.items() for field in v}
 
     def arg_parse(self, request):
         queryDict = {}
@@ -41,7 +50,9 @@ class Query(object):
             queryDict = request.POST
 
         for key, value in queryDict.items():
-            if(self.key_to_type.get(key)):
+            if key in {"action"}:
+                result[key] = value
+            elif key in self.key_to_type:
                 result[self.key_to_type.get(key)][key] = value
             else:
                 result["where"][key] = value
@@ -49,7 +60,7 @@ class Query(object):
 
     def get_where(self, table, query):
         fields = tablename_to_fields[table]
-        sql_where = "where "
+        # sql_where = "where "
         in_conditions = []
         out_conditions = []
         others_conditions = []
@@ -57,12 +68,19 @@ class Query(object):
             if(key.find("in_out_") == 0):
                 key = key[7:]
                 key = tablename_to_fields[table]["transform"].get(key, key)
+                if key not in fields:
+                    print("fields not exists this key：", key)
+                    continue
+                field = fields[key]
                 in_conditions.append(
                     "in_" + key + " " + field["joiner"] + " '" + value + "'")
                 out_conditions.append(
                     "out_" + key + " " + field["joiner"] + " '" + value + "'")
             else:
                 key = tablename_to_fields[table]["transform"].get(key, key)
+                if key not in fields:
+                    print("fields not exists this key：", key)
+                    continue
                 field = fields[key]
                 if(field["type"] in ["str"]):
                     others_conditions.append(
@@ -77,10 +95,28 @@ class Query(object):
 
     def __combination_where_condition(self, in_conditions, out_conditions, others):
         sql_where = ' where '
-        if(in_conditions != []):
-            sql_where += "(" + " and ".join(in_conditions) + ") or "
-            sql_where += "(" + " and ".join(out_conditions) + ")"
-        sql_where += " and ".join(others)
+        in_where = ''
+        out_where = ''
+        other_where = ''
+        all_where = ''
+        if in_conditions:
+            in_where = " ( " + " and ".join(in_conditions) + " ) "
+            all_where += in_where
+        if out_conditions:
+            out_where = " ( " + " and ".join(in_conditions) + " ) "
+            if all_where:
+                all_where += " or "
+            all_where += out_where
+        if others:
+            other_where = " ( " + " and ".join(others) + " ) "
+            if all_where:
+                all_where = " ( " + all_where + " ) " + " and " + other_where
+            else:
+                all_where = other_where
+        if all_where:
+            sql_where += all_where
+        else:
+            sql_where = ''
         return sql_where
 
     def get_page(self, query):
@@ -98,8 +134,8 @@ class Query(object):
 
     def join_sql(self, query):
         data_sql = "select * from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"]) + \
-            self.get_sort() + self.get_page(query["page"])
-        count_sql = "select count(*) from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"])
+            self.get_sort() + self.get_page(query["page"]) + ";"
+        count_sql = "select count(*) from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"]) + ";"
         return {
             "data_sql": data_sql,
             "count_sql": count_sql,
@@ -151,6 +187,7 @@ class Query(object):
 
     def search(self, request):
         http_args = self.arg_parse(request)
+        print(http_args)
         sqls = self.join_sql(http_args)
         conn = connector("edges")
         data_sql = sqls["data_sql"]
@@ -159,14 +196,15 @@ class Query(object):
         count_sql = sqls["count_sql"]
         print(count_sql)
         conn.close()
+        print(sql_result[:1])
         result = {
             "data": list(sql_result),
             "itemcount": 1000,
             "time": 0
         }
         # 这个地方可以再讨论，到底是返回response还是数据。
-        if("export" in http_args["export"] and http_args["export"]["export"] == True):
+        if("export" in http_args["export"] and http_args["export"]["export"] is True):
             response = self.export(http_args["export"], result["data"])
         else:
-            response = HttpResponse(result, content_type="application/json")
+            response = HttpResponse(json.dumps(result, indent=4, cls=DateEncoder), content_type="application/json")
         return response
