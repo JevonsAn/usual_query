@@ -145,6 +145,6 @@ request_contain_key={
     "page": ["pageIndex", "pageSize",""],
     "sort": ["sortOrder","sortField"],
     "action": ["all"],
-    "export": ["export_limit"],
+    "export": ["export_type", "export"],
     "where": []
 }
