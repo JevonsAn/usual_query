@@ -1,5 +1,5 @@
 from setting import tablename_to_fields, action_to_tablename, request_contain_key
-from mysql import conn
+from database.operate import connector
 from django.http import FileResponse
 import time
 import json
@@ -8,14 +8,17 @@ import csv
 from django.http import StreamingHttpResponse
 from django.http import HttpResponse
 
+
 class Echo(object):
     """
     An object that implements just the write method of the file-like
     interface.
     """
+
     def write(self, value):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
+
 
 class Query(object):
     """docstring for Query"""
@@ -55,18 +58,18 @@ class Query(object):
                 key = key[7:]
                 key = tablename_to_fields[table]["transform"].get(key, key)
                 in_conditions.append(
-                    "in_"+key + " " + field["joiner"] + " '"+value+"'")
+                    "in_" + key + " " + field["joiner"] + " '" + value + "'")
                 out_conditions.append(
-                    "out_"+key + " " + field["joiner"] + " '"+value+"'")
+                    "out_" + key + " " + field["joiner"] + " '" + value + "'")
             else:
                 key = tablename_to_fields[table]["transform"].get(key, key)
                 field = fields[key]
                 if(field["type"] in ["str"]):
                     others_conditions.append(
-                        key + " " + field["joiner"] + " '"+value+"'")
+                        key + " " + field["joiner"] + " '" + value + "'")
                 else:
                     others_conditions.append(
-                        key + " " + field["joiner"] + " "+value+"")
+                        key + " " + field["joiner"] + " " + value + "")
             # where_conditions.append("")
         sql_where = self.__combination_where_condition(
             in_conditions, out_conditions, others_conditions)
@@ -75,33 +78,36 @@ class Query(object):
     def __combination_where_condition(self, in_conditions, out_conditions, others):
         sql_where = ' where '
         if(in_conditions != []):
-            sql_where += "("+" and ".join(in_conditions)+") or "
-            sql_where += "("+" and ".join(out_conditions)+")"
+            sql_where += "(" + " and ".join(in_conditions) + ") or "
+            sql_where += "(" + " and ".join(out_conditions) + ")"
         sql_where += " and ".join(others)
         return sql_where
 
     def get_page(self, query):
         sql_limit = " limit "
-        sql_limit += str( (int(query["pageIndex"])-1) * int(query["pageSize"]) ) + \
+        sql_limit += str((int(query["pageIndex"]) - 1) * int(query["pageSize"])) + \
             "," + str(query["pageSize"])
         return sql_limit
 
-    def get_sort(self ):
-        
+    def get_sort(self):
+
         return ""
-    
-    def get_table(self,action):
-        
+
+    def get_table(self, action):
         return action_to_tablename[action]
 
-    def join_sql(self ,query):
-        sql = "select * from " + self.get_table(query["action"]) + self.get_where( self.get_table(query["action"]) , query["where"] ) + \
+    def join_sql(self, query):
+        data_sql = "select * from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"]) + \
             self.get_sort() + self.get_page(query["page"])
-        return sql
+        count_sql = "select count(*) from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"])
+        return {
+            "data_sql": data_sql,
+            "count_sql": count_sql,
+        }
 
     def export(self, query, rows):
         def trans_dict_to_xml(data_dict):
-            #字典转换为xml字符串
+            # 字典转换为xml字符串
             xml_data = []
             for k in data_dict.keys():  # 遍历字典排序后的key
                 v = data_dict.get(k)  # 取出字典中key对应的value
@@ -145,17 +151,21 @@ class Query(object):
 
     def search(self, request):
         http_args = self.arg_parse(request)
-        sql = self.join_sql(http_args)
-        conn()
-        exe()
+        sqls = self.join_sql(http_args)
+        conn = connector("edges")
+        data_sql = sqls["data_sql"]
+        print(data_sql)
+        sql_result = conn.execute_and_fetch(data_sql)
+        count_sql = sqls["count_sql"]
+        print(count_sql)
         conn.close()
         result = {
-            "data": [],
-            "itemcount": [],
+            "data": list(sql_result),
+            "itemcount": 1000,
             "time": 0
         }
         # 这个地方可以再讨论，到底是返回response还是数据。
-        if("export" in http_args["export"] and http_args["export"]["export"] == True ):
+        if("export" in http_args["export"] and http_args["export"]["export"] == True):
             response = self.export(http_args["export"], result["data"])
         else:
             response = HttpResponse(result, content_type="application/json")
