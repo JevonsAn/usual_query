@@ -29,11 +29,22 @@ class DateEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
+class CJsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(obj, date):
+            return obj.strftime("%Y-%m-%d")
+        else:
+            return json.JSONEncoder.default(self, obj)
+
+
 class Query(object):
     """docstring for Query"""
 
     def __init__(self):
-        self.key_to_type = {field: k for k, v in request_contain_key.items() for field in v}
+        self.key_to_type = {field: k for k,
+                            v in request_contain_key.items() for field in v}
 
     def arg_parse(self, request):
         queryDict = {}
@@ -59,7 +70,9 @@ class Query(object):
         return result
 
     def get_where(self, table, query):
-        fields = tablename_to_fields[table]
+
+        fields = tablename_to_fields[table]["fields"]
+        print("fields:\n", fields)
         # sql_where = "where "
         in_conditions = []
         out_conditions = []
@@ -68,14 +81,25 @@ class Query(object):
             if(key.find("in_out_") == 0):
                 key = key[7:]
                 key = tablename_to_fields[table]["transform"].get(key, key)
-                if key not in fields:
-                    print("fields not exists this key：", key)
-                    continue
-                field = fields[key]
-                in_conditions.append(
-                    "in_" + key + " " + field["joiner"] + " '" + value + "'")
-                out_conditions.append(
-                    "out_" + key + " " + field["joiner"] + " '" + value + "'")
+                key = ("in_" + key, "out_" + key)
+                if (key[0] not in fields) or (key[1] not in fields):
+                        print("fields not exists this key：", key)
+                        continue
+                field = (fields[key[0]], fields[key[1]])
+
+                if(field[0]["type"] in ["varchar"]):
+                    in_conditions.append(
+                        key[0] + " " + field[0]["joiner"] + " '" + value + "'")
+                else:
+                    in_conditions.append(
+                        key[0] + " " + field[0]["joiner"] + " " + value + "")
+
+                if(field[1]["type"] in ["varchar"]):
+                    out_conditions.append(
+                        key[1] + " " + field[1]["joiner"] + " '" + value + "'")
+                else:
+                    out_conditions.append(
+                        key[1] + " " + field[1]["joiner"] + " " + value + "")
             else:
                 key = tablename_to_fields[table]["transform"].get(key, key)
                 if key not in fields:
@@ -91,6 +115,7 @@ class Query(object):
             # where_conditions.append("")
         sql_where = self.__combination_where_condition(
             in_conditions, out_conditions, others_conditions)
+        print("sql_where:\n", sql_where)
         return sql_where
 
     def __combination_where_condition(self, in_conditions, out_conditions, others):
@@ -103,7 +128,7 @@ class Query(object):
             in_where = " ( " + " and ".join(in_conditions) + " ) "
             all_where += in_where
         if out_conditions:
-            out_where = " ( " + " and ".join(in_conditions) + " ) "
+            out_where = " ( " + " and ".join(out_conditions) + " ) "
             if all_where:
                 all_where += " or "
             all_where += out_where
@@ -135,54 +160,64 @@ class Query(object):
     def join_sql(self, query):
         data_sql = "select * from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"]) + \
             self.get_sort() + self.get_page(query["page"]) + ";"
-        count_sql = "select count(*) from " + self.get_table(query["action"]) + self.get_where(self.get_table(query["action"]), query["where"]) + ";"
+        count_sql = "select count(*) from " + self.get_table(query["action"]) + self.get_where(
+            self.get_table(query["action"]), query["where"]) + ";"
         return {
             "data_sql": data_sql,
             "count_sql": count_sql,
         }
 
     def export(self, query, rows):
-        def trans_dict_to_xml(data_dict):
+        def trans_list_to_xml(data_list):
             # 字典转换为xml字符串
             xml_data = []
-            for k in data_dict.keys():  # 遍历字典排序后的key
-                v = data_dict.get(k)  # 取出字典中key对应的value
-                xml_data.append('<{key}>{value}</{key}>'.format(key=k, value=v))
-            xml = ''.join(xml_data)
-            xml = '<xml>{}</xml>'.format(xml)
-            return xml
+            for row in data_list:
+                xml_row = []
+                for k in row.keys():  # 遍历字典排序后的key
+                    v = row.get(k)  # 取出字典中key对应的value
+                    xml_row.append(
+                        '<{key}>{value}</{key}>'.format(key=k, value=v))
+                xml_row = ''.join(xml_row)
+                xml_row = '<row>{}</row>'.format(xml_row)
+                xml_data.append(xml_row)
+            xml_data = '<xml>{}</xml>'.format(xml_data)
+            return xml_data
 
-        def trans_dict_to_csv(data_dict):
+        def trans_list_to_csv(data_list):
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            return data_dict
+            return data_list
 
-        def trans_dict_to_json(data_dict):
-            json_data = json.dumps(data_dict)
+        def trans_list_to_json(data_list):
+            print("data_list:")
+            print(data_list[:1])
+            json_data = json.dumps(data_list, cls=CJsonEncoder)
             return json_data
         t = time.time()
 
-        if("json" == query["export"]):
-            data = trans_dict_to_json(rows)
-            response = FileResponse(data)
-            response['Content-Type'] = 'application/json'
-            response['Content-Disposition'] = 'attachment;filename=' + \
-                int(round(t * 1000000)) + '.json'
-        if("xml" in query["export"]):
-            data = trans_dict_to_xml(rows)
+        if("xml" == query["export_type"]):
+            data = trans_list_to_xml(rows)
             response = FileResponse(data)
             response['Content-Type'] = 'application/xml'
             response['Content-Disposition'] = 'attachment;filename=' + \
-                int(round(t * 1000000)) + '.xml'
-        if("csv" in query["export"]):
+                str(int(round(t * 1000000))) + '.xml'
+        elif("csv" == query["export_type"]):
             pseudo_buffer = Echo()
+            # rows = (["Row {}".format(idx), str(idx)] for idx in xrange(65536))
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                              content_type="text/csv")
             response['Content-Disposition'] = 'attachment;filename=' + \
-                int(round(t * 1000000)) + '.csv'
+                str(int(round(t * 1000000))) + '.csv'
+        # if("json" == query["export_type"]):
+        else:
+            data = trans_list_to_json(rows)
+            response = FileResponse(data)
+            response['Content-Type'] = 'application/json'
+            response['Content-Disposition'] = 'attachment;filename=' + \
+                str(int(round(t * 1000000))) + '.json'
         return response
 
     def search(self, request):
@@ -195,16 +230,20 @@ class Query(object):
         sql_result = conn.execute_and_fetch(data_sql)
         count_sql = sqls["count_sql"]
         print(count_sql)
+        count_result = conn.execute_and_fetch(count_sql)
+
         conn.close()
-        print(sql_result[:1])
+        print("count_result:", count_result)
         result = {
             "data": list(sql_result),
-            "itemcount": 1000,
+            "itemsCount": count_result[0]["count(*)"],
             "time": 0
         }
         # 这个地方可以再讨论，到底是返回response还是数据。
-        if("export" in http_args["export"] and http_args["export"]["export"] is True):
+        if("export" in http_args["export"] and http_args["export"]["export"] == "true"):
+            print("export is true")
             response = self.export(http_args["export"], result["data"])
         else:
-            response = HttpResponse(json.dumps(result, indent=4, cls=DateEncoder), content_type="application/json")
+            response = HttpResponse(json.dumps(
+                result, indent=4, cls=DateEncoder), content_type="application/json")
         return response
