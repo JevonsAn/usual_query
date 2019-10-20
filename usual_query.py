@@ -82,7 +82,7 @@ class Query(object):
                     print("fields not exists this key：", key)
                     continue
                 field = fields[key]
-                if(field["type"] in ["str"]):
+                if(field["type"] in ["varchar"]):
                     others_conditions.append(
                         key + " " + field["joiner"] + " '" + value + "'")
                 else:
