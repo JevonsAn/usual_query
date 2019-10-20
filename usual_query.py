@@ -39,12 +39,15 @@ class CJsonEncoder(json.JSONEncoder):
             return json.JSONEncoder.default(self, obj)
 
 
+
 class Query(object):
     """docstring for Query"""
 
     def __init__(self):
         self.key_to_type = {field: k for k,
                             v in request_contain_key.items() for field in v}
+    
+    
 
     def arg_parse(self, request):
         queryDict = {}
@@ -221,6 +224,9 @@ class Query(object):
         return response
 
     def search(self, request):
+        
+        start = time.time()
+
         http_args = self.arg_parse(request)
         print(http_args)
         sqls = self.join_sql(http_args)
@@ -234,6 +240,10 @@ class Query(object):
 
         conn.close()
         print("count_result:", count_result)
+        
+        end = time.time()
+        print "程序执行时间"
+        print(end-start)
         result = {
             "data": list(sql_result),
             "itemsCount": count_result[0]["count(*)"],
