@@ -39,15 +39,12 @@ class CJsonEncoder(json.JSONEncoder):
             return json.JSONEncoder.default(self, obj)
 
 
-
 class Query(object):
     """docstring for Query"""
 
     def __init__(self):
         self.key_to_type = {field: k for k,
                             v in request_contain_key.items() for field in v}
-    
-    
 
     def arg_parse(self, request):
         queryDict = {}
@@ -75,7 +72,7 @@ class Query(object):
     def get_where(self, table, query):
 
         fields = tablename_to_fields[table]["fields"]
-        print("fields:\n", fields)
+        # print("fields:\n", fields)
         # sql_where = "where "
         in_conditions = []
         out_conditions = []
@@ -86,7 +83,7 @@ class Query(object):
                 key = tablename_to_fields[table]["transform"].get(key, key)
                 key = ("in_" + key, "out_" + key)
                 if (key[0] not in fields) or (key[1] not in fields):
-                        print("fields not exists this key：", key)
+                        # print("fields not exists this key：", key)
                         continue
                 field = (fields[key[0]], fields[key[1]])
 
@@ -106,7 +103,7 @@ class Query(object):
             else:
                 key = tablename_to_fields[table]["transform"].get(key, key)
                 if key not in fields:
-                    print("fields not exists this key：", key)
+                    # print("fields not exists this key：", key)
                     continue
                 field = fields[key]
                 if(field["type"] in ["varchar"]):
@@ -118,7 +115,7 @@ class Query(object):
             # where_conditions.append("")
         sql_where = self.__combination_where_condition(
             in_conditions, out_conditions, others_conditions)
-        print("sql_where:\n", sql_where)
+        # print("sql_where:\n", sql_where)
         return sql_where
 
     def __combination_where_condition(self, in_conditions, out_conditions, others):
@@ -194,8 +191,8 @@ class Query(object):
             return data_list
 
         def trans_list_to_json(data_list):
-            print("data_list:")
-            print(data_list[:1])
+            # print("data_list:")
+            # print(data_list[:1])
             json_data = json.dumps(data_list, cls=CJsonEncoder)
             return json_data
         t = time.time()
@@ -224,34 +221,33 @@ class Query(object):
         return response
 
     def search(self, request):
-        
-        start = time.time()
+
+        start = time.clock()
 
         http_args = self.arg_parse(request)
-        print(http_args)
+        # print(http_args)
         sqls = self.join_sql(http_args)
         conn = connector("edges")
         data_sql = sqls["data_sql"]
-        print(data_sql)
+        # print(data_sql)
         sql_result = conn.execute_and_fetch(data_sql)
         count_sql = sqls["count_sql"]
-        print(count_sql)
+        # print(count_sql)
         count_result = conn.execute_and_fetch(count_sql)
 
         conn.close()
-        print("count_result:", count_result)
-        
-        end = time.time()
-        print "程序执行时间"
-        print(end-start)
+        # print("count_result:", count_result)
+
+        # print "程序执行时间"
+        # print (time.clock()-start)
         result = {
             "data": list(sql_result),
             "itemsCount": count_result[0]["count(*)"],
-            "time": 0
+            "time": round(time.clock()-start)
         }
         # 这个地方可以再讨论，到底是返回response还是数据。
         if("export" in http_args["export"] and http_args["export"]["export"] == "true"):
-            print("export is true")
+            # print("export is true")
             response = self.export(http_args["export"], result["data"])
         else:
             response = HttpResponse(json.dumps(
