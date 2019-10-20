@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from setting import tablename_to_fields, action_to_tablename, request_contain_key
+from setting import tablename_to_fields, action_to_tablename, request_contain_key, action_transform_fields
 from database.operate import connector
 from django.http import FileResponse
 import time
@@ -9,6 +9,8 @@ import csv
 from django.http import StreamingHttpResponse
 from django.http import HttpResponse
 from datetime import datetime
+from datetime import date
+from decimal import Decimal
 
 
 class Echo(object):
@@ -22,19 +24,14 @@ class Echo(object):
         return value
 
 
-class DateEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.__str__()
-        return json.JSONEncoder.default(self, obj)
-
-
 class CJsonEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(obj, date):
             return obj.strftime("%Y-%m-%d")
+        elif isinstance(obj, Decimal):
+            return float(obj)
         else:
             return json.JSONEncoder.default(self, obj)
 
@@ -60,17 +57,18 @@ class Query(object):
         else:
             queryDict = request.POST
 
+        action = queryDict["action"]
         for key, value in queryDict.items():
             if key in {"action"}:
                 result[key] = value
             elif key in self.key_to_type:
                 result[self.key_to_type.get(key)][key] = value
             else:
+                key = action_transform_fields.get(action, {}).get(key, key)
                 result["where"][key] = value
         return result
 
     def get_where(self, table, query):
-
         fields = tablename_to_fields[table]["fields"]
         # print("fields:\n", fields)
         # sql_where = "where "
@@ -80,33 +78,33 @@ class Query(object):
         for key, value in query.items():
             if(key.find("in_out_") == 0):
                 key = key[7:]
-                key = tablename_to_fields[table]["transform"].get(key, key)
+                # key = tablename_to_fields[table]["transform"].get(key, key)
                 key = ("in_" + key, "out_" + key)
                 if (key[0] not in fields) or (key[1] not in fields):
-                        # print("fields not exists this key：", key)
-                        continue
+                    # print("fields not exists this key：", key)
+                    continue
                 field = (fields[key[0]], fields[key[1]])
 
-                if(field[0]["type"] in ["varchar"]):
+                if(field[0]["type"] in {"varchar", "char"}):
                     in_conditions.append(
                         key[0] + " " + field[0]["joiner"] + " '" + value + "'")
                 else:
                     in_conditions.append(
                         key[0] + " " + field[0]["joiner"] + " " + value + "")
 
-                if(field[1]["type"] in ["varchar"]):
+                if(field[1]["type"] in {"varchar", "char"}):
                     out_conditions.append(
                         key[1] + " " + field[1]["joiner"] + " '" + value + "'")
                 else:
                     out_conditions.append(
                         key[1] + " " + field[1]["joiner"] + " " + value + "")
             else:
-                key = tablename_to_fields[table]["transform"].get(key, key)
+                # key = tablename_to_fields[table]["transform"].get(key, key)
                 if key not in fields:
                     # print("fields not exists this key：", key)
                     continue
                 field = fields[key]
-                if(field["type"] in ["varchar"]):
+                if(field["type"] in {"varchar", "char"}):
                     others_conditions.append(
                         key + " " + field["joiner"] + " '" + value + "'")
                 else:
@@ -193,7 +191,7 @@ class Query(object):
         def trans_list_to_json(data_list):
             # print("data_list:")
             # print(data_list[:1])
-            json_data = json.dumps(data_list, cls=CJsonEncoder)
+            json_data = json.dumps(data_list, cls=CJsonEncoder, ensure_ascii=False, indent=4)
             return json_data
         t = time.time()
 
@@ -221,7 +219,6 @@ class Query(object):
         return response
 
     def search(self, request):
-
         start = time.clock()
 
         http_args = self.arg_parse(request)
@@ -229,11 +226,11 @@ class Query(object):
         sqls = self.join_sql(http_args)
         conn = connector("edges")
         data_sql = sqls["data_sql"]
-        # print(data_sql)
+        print(data_sql)
         sql_result = conn.execute_and_fetch(data_sql)
         count_sql = sqls["count_sql"]
         # print(count_sql)
-        count_result = conn.execute_and_fetch(count_sql)
+        # count_result = conn.execute_and_fetch(count_sql)  # count(*)执行时间过长,先注释掉
 
         conn.close()
         # print("count_result:", count_result)
@@ -242,8 +239,8 @@ class Query(object):
         # print (time.clock()-start)
         result = {
             "data": list(sql_result),
-            "itemsCount": count_result[0]["count(*)"],
-            "time": round(time.clock()-start)
+            "itemsCount": 1000000,  # count_result[0]["count(*)"],
+            "time": round(time.clock() - start)
         }
         # 这个地方可以再讨论，到底是返回response还是数据。
         if("export" in http_args["export"] and http_args["export"]["export"] == "true"):
@@ -251,5 +248,5 @@ class Query(object):
             response = self.export(http_args["export"], result["data"])
         else:
             response = HttpResponse(json.dumps(
-                result, indent=4, cls=DateEncoder), content_type="application/json")
+                result, indent=4, cls=CJsonEncoder), content_type="application/json")
         return response
